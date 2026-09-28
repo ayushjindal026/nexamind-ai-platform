@@ -1,0 +1,28 @@
+# --- Phase 1: app boot + DB connectivity check ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- Phase 2: migrations, auth, tenant model ---
+alembic==1.14.0
+pyjwt==2.10.1
+argon2-cffi==23.1.0
+email-validator==2.2.0
+
+# --- Phase 3: document upload + PDF extraction ---
+python-multipart==0.0.32
+pymupdf==1.28.2
+
+# --- Phase 4: embeddings + vector search ---
+pgvector==0.5.0
+openai==3.19.2
+
+# --- Testing (used from Phase 1 onward) ---
+pytest==8.3.4
+httpx==0.28.1
+
+# --- Added in later phases, listed here for visibility, NOT installed yet:
+# laya                 (Phase 7 — System 1 decision engine)
