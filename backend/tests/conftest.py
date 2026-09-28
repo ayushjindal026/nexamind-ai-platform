@@ -22,6 +22,8 @@ from app.db.base import Base
 from app.db.session import engine, get_db
 from app.documents.storage import LocalFilesystemStorage, get_storage_backend
 from app.embeddings.provider import get_embedding_provider
+from app.llm.provider import get_llm_provider
+from app.decisions.engine import get_decision_engine
 from app.main import app
 
 
@@ -64,6 +66,12 @@ def client(db_session):
     # developer has OPENAI_API_KEY set locally. Tests that exercise embedding
     # opt in explicitly with the `embedding_provider` fixture (test_embeddings.py).
     app.dependency_overrides[get_embedding_provider] = lambda: None
+    # LLM calls are also disabled by default; assistant tests explicitly
+    # inject deterministic fakes and never contact a paid service.
+    app.dependency_overrides[get_llm_provider] = lambda: None
+    # Never initialize Laya/model weights in test runs; decision tests opt in
+    # to deterministic fakes explicitly.
+    app.dependency_overrides[get_decision_engine] = lambda: None
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

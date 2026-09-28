@@ -8,9 +8,8 @@ dependency-safe order: Organization before the tables that reference it,
 Document before DocumentPage/DocumentChunk.
 
 This is also what Alembic's env.py imports (alongside Base) so that
---autogenerate can see the full schema. Every new model added in a later
-phase (Assistant in Phase 10, etc.) gets one import line added here, and
-nowhere else.
+--autogenerate can see the full schema. Every new model gets one import line
+added here, and nowhere else.
 """
 
 from app.models.organization import Organization
@@ -19,6 +18,7 @@ from app.models.membership import Membership, MembershipRole
 from app.models.document import Document, DocumentStatus
 from app.models.document_page import DocumentPage
 from app.models.document_chunk import DocumentChunk
+from app.models.assistant import Assistant
 
 __all__ = [
     "Organization",
@@ -29,4 +29,5 @@ __all__ = [
     "DocumentStatus",
     "DocumentPage",
     "DocumentChunk",
+    "Assistant",
 ]

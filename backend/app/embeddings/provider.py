@@ -1,12 +1,5 @@
 """
-Embedding provider abstraction.
-
-One Protocol, one production implementation (OpenAI's text-embedding-3-small,
-1536 dimensions — a stable, well-documented, cost-effective choice already
-settled in the original architecture design). A future provider swap (a
-different API, a locally-hosted model) means one new class implementing the
-same `embed()` method — no changes to app/embeddings/service.py or
-app/retrieval/service.py, which only ever depend on the Protocol.
+Embedding provider abstraction for OpenAI and Gemini.
 
 EMBEDDING_DIMENSION is a fixed module-level constant, not a runtime Settings
 value: pgvector requires a fixed dimension baked into the column's DDL
@@ -23,6 +16,8 @@ already used for StorageBackend in Phase 3 (see tests/embedding_fixtures.py).
 import logging
 from typing import Protocol
 
+from google import genai
+from google.genai import types
 from openai import OpenAI, OpenAIError
 
 from app.core.config import settings
@@ -67,13 +62,43 @@ class OpenAIEmbeddingProvider:
         return [item.embedding for item in ordered]
 
 
+class GeminiEmbeddingProvider:
+    """Gemini Embedding 2 adapter returning separate 1536d vectors per text."""
+
+    def __init__(self, api_key: str, model: str = "gemini-embedding-2", client=None):
+        self._client = client or genai.Client(api_key=api_key)
+        self._model = model
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        # Gemini Embedding 2 aggregates raw multi-part inputs. A list of
+        # Content entries instead produces one corresponding vector per text.
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=text)],
+            )
+            for text in texts
+        ]
+        try:
+            response = self._client.models.embed_content(
+                model=self._model,
+                contents=contents,
+                config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSION),
+            )
+            return [[float(value) for value in item.values] for item in response.embeddings]
+        except Exception as exc:  # SDK errors vary by HTTP/auth failure type
+            raise EmbeddingProviderError("Gemini embedding request failed") from exc
+
+
 _embedding_provider_instance: EmbeddingProvider | None = None
 _embedding_provider_resolved: bool = False
 
 
 def get_embedding_provider() -> EmbeddingProvider | None:
     """
-    FastAPI dependency. Returns None if no OPENAI_API_KEY is configured —
+    FastAPI dependency. Returns None if the selected provider key is absent —
     callers decide what "no provider" means for them: the upload pipeline
     treats it as "skip embedding, leave chunks pending" (never a hard
     failure — see app/documents/router.py); the retrieval search endpoint
@@ -84,12 +109,28 @@ def get_embedding_provider() -> EmbeddingProvider | None:
     """
     global _embedding_provider_instance, _embedding_provider_resolved
     if not _embedding_provider_resolved:
-        if settings.openai_api_key:
+        if settings.embedding_provider == "openai" and settings.openai_api_key:
             _embedding_provider_instance = OpenAIEmbeddingProvider(
                 api_key=settings.openai_api_key, model=settings.embedding_model
             )
+        elif settings.embedding_provider == "gemini" and (settings.gemini_api_key or "").strip():
+            try:
+                _embedding_provider_instance = GeminiEmbeddingProvider(
+                    api_key=settings.gemini_api_key.strip(),
+                    model=settings.gemini_embedding_model,
+                )
+            except Exception:
+                logger.exception("Gemini embedding provider could not be initialized")
+                _embedding_provider_instance = None
         else:
-            logger.info("OPENAI_API_KEY not configured; embedding provider unavailable")
+            configured_provider = settings.embedding_provider
+            if configured_provider not in ("openai", "gemini"):
+                logger.error("Unsupported embedding provider configured: %s", configured_provider)
+                _embedding_provider_instance = None
+                _embedding_provider_resolved = True
+                return _embedding_provider_instance
+            key_name = "OPENAI_API_KEY" if settings.embedding_provider == "openai" else "GEMINI_API_KEY"
+            logger.info("%s not configured; embedding provider unavailable", key_name)
             _embedding_provider_instance = None
         _embedding_provider_resolved = True
     return _embedding_provider_instance

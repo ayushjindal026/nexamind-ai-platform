@@ -14,7 +14,9 @@ in app/auth/router.py.
 
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,8 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.documents.service import (
     DocumentQuotaExceededError,
+    DocumentNotFoundError,
+    delete_document,
     EmptyFileError,
     FileTooLargeError,
     PageLimitExceededError,
@@ -142,3 +146,25 @@ def list_documents_endpoint(
     documents = list_documents(db, membership.organization_id)
     counts = get_chunk_counts(db, [document.id for document in documents])
     return [_to_document_out(document, counts.get(document.id)) for document in documents]
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document_endpoint(
+    document_id: uuid.UUID,
+    membership: Membership = Depends(get_current_membership),
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_storage_backend),
+) -> Response:
+    try:
+        delete_document(db, storage, membership.organization_id, document_id)
+    except DocumentNotFoundError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    except StorageError:
+        db.rollback()
+        logger.exception("Document storage deletion failed")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Document database deletion failed")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

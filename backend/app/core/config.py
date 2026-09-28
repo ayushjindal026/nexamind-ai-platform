@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     # constant tied to the pgvector column DDL (see app/embeddings/provider.py).
     openai_api_key: str | None = None
     embedding_model: str = "text-embedding-3-small"
+    embedding_provider: Literal["openai", "gemini"] = "openai"
+    gemini_api_key: str | None = None
+    gemini_embedding_model: str = "gemini-embedding-2"
+
+    # --- Phase 6: grounded answer generation ---
+    llm_model: str = "gpt-4o-mini"
+    answer_min_similarity: float = 0.25
+    llm_provider: Literal["openai", "gemini"] = "openai"
+    gemini_llm_model: str = "gemini-3.8-flash"
+
+    # --- Phase 7: Laya System 1 decision engine ---
+    laya_device: str = "cpu"
 
     @property
     def cors_origin_list(self) -> list[str]:

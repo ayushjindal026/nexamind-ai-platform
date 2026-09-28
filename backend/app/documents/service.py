@@ -63,6 +63,10 @@ class DocumentQuotaExceededError(Exception):
     pass
 
 
+class DocumentNotFoundError(Exception):
+    pass
+
+
 def sanitize_filename(filename: str) -> str:
     """
     Basename-only, control-character/null-byte stripped, length-capped.
@@ -100,6 +104,25 @@ def list_documents(db: Session, organization_id: uuid.UUID) -> list[Document]:
         .order_by(Document.created_at.desc())
         .all()
     )
+
+
+def delete_document(
+    db: Session, storage: StorageBackend, organization_id: uuid.UUID, document_id: uuid.UUID
+) -> None:
+    """Delete a document only when it belongs to the caller's organization."""
+    document = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.organization_id == organization_id)
+        .one_or_none()
+    )
+    if document is None:
+        raise DocumentNotFoundError()
+    # Delete storage first. If that fails, retain the database record. A DB
+    # failure after this operation can leave a record whose file is missing;
+    # this local-storage MVP has no cross-system transaction mechanism.
+    storage.delete(document.storage_key)
+    db.delete(document)
+    db.commit()
 
 
 def upload_document(

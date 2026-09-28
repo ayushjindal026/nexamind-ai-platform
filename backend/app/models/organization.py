@@ -33,3 +33,8 @@ class Organization(Base):
         back_populates="organization",
         cascade="all, delete-orphan",
     )
+    assistant: Mapped["Assistant | None"] = relationship(  # noqa: F821
+        back_populates="organization",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

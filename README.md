@@ -2,9 +2,9 @@
 
 PanScience Innovations SDE-1 take-home. Built incrementally, phase by phase — see `IMPLEMENTATION_LOG.md` (added from Phase 2 onward) for what exists at each stage.
 
-## Status: Phase 4 — Embeddings, pgvector storage, and organization-scoped retrieval
+## Status: Phase 7 — Assistant access, grounded RAG, and structured decisions
 
-Implements (on top of Phase 3's upload/extraction): `document_chunks` table with a pgvector `vector(1536)` column and HNSW cosine index, an `EmbeddingProvider` interface (OpenAI `text-embedding-3-small` implementation), best-effort chunking + embedding after upload, and `POST /api/retrieval/search` — the tenant-scoped similarity-search primitive later RAG phases build on. No LLM, Laya, or assistant/chat yet — see Phase log below.
+Phase 4 provides `document_chunks` with pgvector embeddings and organization-scoped retrieval. Phase 5 adds one assistant identity per organization with a hashed, rotatable visitor token, authenticated management endpoints, and tenant-scoped document deletion. Phase 6 adds unauthenticated `POST /api/ask`, which reuses Phase 4 retrieval and generates grounded answers through an LLM provider interface. Phase 7 adds an LLM decision planner and an independent Laya System 1 adapter for structured choice, boolean, score, and classification decisions. Structured results and deterministic eligibility combinations are included in the final grounded answer and API response. Public answers include server-generated document/page citations; when retrieval finds no sufficiently relevant chunk, the API responds that the information is not available without calling the LLM.
 
 ## Architecture (final target — implemented incrementally)
 
@@ -20,12 +20,10 @@ Visitor (no login)                    Org Admin (dashboard)
                       │
       ┌───────────────┼──────────────────────┐
       ▼                                       ▼
- /api/ask pipeline:                  /api/documents, /api/assistant,
- retrieve → classify →                /api/usage (dashboard CRUD)
- decompose (if needed) →
- System 1 (Laya) →
- combine (app logic) →
- final LLM answer →
+ /api/ask pipeline:                  /api/documents, /api/assistant
+ retrieve → LLM decision plan
+      ├─ ordinary question: final LLM answer
+      └─ structured decision: Laya System 1 → app combination → final LLM
  citations
 ```
 
@@ -58,10 +56,24 @@ documents ──< document_pages (raw extraction, one row per page)
 - **Chunking** (`app/documents/chunking.py`): one chunk per non-empty page today. `chunk_index` already exists so sub-page splitting later is a change to that one function, not a migration.
 - **Embedding is an enhancement, never a precondition of upload.** After a successful upload the router chunks and embeds in one batched provider call. No provider configured, a provider failure, or malformed provider output all leave the document `ready` with un-embedded chunks (`embedded_chunk_count < chunk_count` in the API response). `embed_pending_chunks_for_organization()` embeds whatever is still pending — no queue or worker.
 - **Retrieval** (`app/retrieval/service.py`): `search_similar_chunks(db, organization_id, query_embedding, top_k, min_similarity)`. `organization_id` is a required argument, every query joins through `documents` and filters on `documents.organization_id` (chunks carry no `organization_id` of their own — the document is the single ownership boundary, same as `document_pages`). Only embedded chunks of `ready` documents are searchable; `min_similarity` is the relevance-threshold hook the answer pipeline will use to say "not in the knowledge base" without calling an LLM with irrelevant context.
-- **Provider abstraction**: only `app/embeddings/provider.py` knows about OpenAI. Tests inject a deterministic offline embedder (`tests/embedding_fixtures.py`, feature hashing) and the test suite deliberately **never** calls a real embedding API, even if `OPENAI_API_KEY` is set locally.
+- **Provider abstraction**: `app/embeddings/provider.py` implements OpenAI and Gemini behind the same interface. Tests inject deterministic fakes and never call either live API, even if provider keys are set locally.
 - **Why the dimension isn't a setting:** pgvector bakes the dimension into the column DDL, so changing it always means a migration plus re-embedding everything.
 
 `POST /api/retrieval/search` — auth required; body `{"query": str, "top_k": 1-20 (default 5), "min_similarity": optional -1..1}`; returns `results[]` with `document_name`, `page_number`, `text`, `similarity`, and a ready-made `citation` (`"Scholarship_Rules.pdf — Page 4"`). `503` if no embedding provider is configured or it is failing (generic message; provider errors are logged, never returned).
+
+### Assistant access and public Q&A (Phases 5–6)
+
+- `GET /api/assistant` — authenticated status for the caller's organization. It never returns the raw visitor token.
+- `POST /api/assistant` — authenticated; creates that organization's assistant and returns its one-time `assistant_token`, a tokenized visitor page URL, and a copyable iframe embed snippet. A second create returns `409`.
+- `POST /api/assistant/regenerate` — authenticated; rotates the token and immediately revokes the previous one. Returns `404` if the organization has no assistant yet.
+- `POST /api/ask` — public; accepts `{"assistant_token": str, "question": str}`. The token may instead be supplied as the `assistant_token` query parameter in the returned URL. Server-side token validation resolves the organization; the client cannot provide an organization id. Response shape: `{"answer": str, "citations": [{"document_id", "document_name", "page_number", "citation"}]}`.
+- `DELETE /api/documents/{document_id}` — authenticated and organization-scoped; removes the stored PDF and its database record, pages, and chunks. A foreign or missing document returns `404`.
+
+The assistant token is generated with a cryptographic random source. Only its SHA-256 digest is stored; create and regenerate reveal the raw token once. The tokenized `/assistant` page provides the visitor chat form and is also used by the iframe embed. Phase 6 uses `OPENAI_API_KEY` for embeddings and chat completions, with `LLM_MODEL` (default `gpt-4o-mini`) selecting the answer model. `ANSWER_MIN_SIMILARITY` (default `0.25`) controls the no-context refusal threshold. Missing providers return a safe `503`; the test suite overrides the LLM dependency with deterministic fakes and never calls the live API.
+
+### Structured decisions (Phase 7)
+
+The existing public `POST /api/ask` endpoint now plans structured work from the retrieved organization context. Ordinary questions keep the Phase 6 answer flow. Decision plans contain independent checks executed together by the `SystemOneProvider` interface and the Laya adapter: assignment `boolean` maps to Laya `noul`, `classification` maps to `choice`, while `choice` and `score` retain their Laya types. Eligibility plans combine boolean checks with explicit `all` or `any` rules in application code; the final LLM explains the resulting decisions using the same retrieved context. The response adds `decisions` and `decision_outcome`; citations remain server-generated. A structured request returns a safe `503` if Laya cannot initialize or evaluate. Set `LAYA_DEVICE=cpu` (the default) to use CPU inference; the first structured request may download model weights. No database tables or migrations are needed.
 
 ## Running locally
 
@@ -100,11 +112,32 @@ curl -X POST http://localhost:8000/api/documents \
   -F "file=@/path/to/some.pdf;type=application/pdf"
 
 curl http://localhost:8000/api/documents -H "Authorization: Bearer <access_token>"
+
+# Create the organization assistant; keep the returned one-time token safe.
+curl -X POST http://localhost:8000/api/assistant \
+  -H "Authorization: Bearer <access_token>"
+
+# Public visitor question (no dashboard JWT). Use the assistant_token returned above.
+curl -X POST http://localhost:8000/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"assistant_token":"<assistant_token>","question":"What is the scholarship GPA requirement?"}'
 ```
 
 ## Configuration
 
 All limits are configurable via environment variables (see `.env.example`), never hard-coded: `MAX_DOCUMENT_SIZE_BYTES` (default 10 MB), `MAX_DOCUMENT_PAGES` (default 20), `MAX_DOCUMENTS_PER_ORGANIZATION` (default 10). `ENVIRONMENT=production` requires an explicitly-set `JWT_SECRET_KEY` — the app refuses to start otherwise rather than silently using the checked-in development default.
+
+Phase 6 also reads `OPENAI_API_KEY`, `LLM_MODEL` (default `gpt-4o-mini`), and `ANSWER_MIN_SIMILARITY` (default `0.25`). The same OpenAI key configures embeddings and answer generation; tests override both provider dependencies and never use the key.
+
+Set `EMBEDDING_PROVIDER=openai` and `LLM_PROVIDER=openai` to retain the defaults. Set either variable to `gemini` to select that provider independently; both Gemini providers use `GEMINI_API_KEY`. Defaults are `GEMINI_EMBEDDING_MODEL=gemini-embedding-2` (output explicitly constrained to 1536 dimensions) and `GEMINI_LLM_MODEL=gemini-3.8-flash`. Gemini Embedding 2 supports 1536 dimensions, matching the existing pgvector schema. The models are selected from Google's current Gen AI API; check the Google AI Studio project's free-tier limits before use. Missing keys leave the selected provider unavailable and provider/API failures use the existing graceful error paths.
+
+The embedding recovery service remains organization-scoped and is not exposed as an HTTP endpoint. Once Gemini is configured and the backend restarted, invoke it for the existing organization from the backend container (replace `<organization-uuid>`):
+
+```powershell
+docker compose exec backend python -c "import uuid; from app.db.session import SessionLocal; from app.embeddings.provider import get_embedding_provider; from app.embeddings.service import embed_pending_chunks_for_organization; db=SessionLocal(); provider=get_embedding_provider(); print(embed_pending_chunks_for_organization(db, provider, uuid.UUID('<organization-uuid>')) if provider else 'Embedding provider is not configured'); db.close()"
+```
+
+The recovery function embeds up to 200 pending chunks per invocation. Run it again while it reports 200 if that organization has more pending chunks. Switching embedding models does not transform existing vectors; chunks already embedded by OpenAI must be re-embedded before they are compared with Gemini query vectors.
 
 ## Known limitations
 
@@ -112,9 +145,11 @@ All limits are configurable via environment variables (see `.env.example`), neve
 - **Retrieval quality is only as good as the embedding model.** The offline test embedder is word-overlap only (no stemming or synonyms) — the suite asserts ranking and isolation, not semantic quality. Real semantic quality needs a real `OPENAI_API_KEY`, which this repo's tests intentionally do not exercise.
 - Page-level chunks: a very long page becomes one large chunk until sub-page chunking is added.
 - Embedding happens synchronously inside the upload request (no worker), so upload latency includes one embedding call.
+- LLM grounding uses retrieved context and an explicit refusal instruction, but generated text cannot be guaranteed free of unsupported claims. Laya weights may need to be downloaded on first structured decision use; missing Laya configuration or inference errors return a safe 503 for decision requests, while ordinary RAG questions remain available.
+- The assistant API, visitor page, and iframe embed are provided, but this phase does not add an organization dashboard.
 - If a document's final database commit fails *and* the follow-up "mark as failed" commit also fails within the same request, the row is left at `processing` with no automatic reconciliation. No queue/worker exists in this MVP to retry it — documented, not hidden (see `app/documents/service.py`).
 - Document storage is a local Docker volume; moving to S3 means implementing one more `StorageBackend`, not restructuring the document service.
-- Only `POST` and `GET` exist for `/api/documents` — no single-document `GET /{id}` or `DELETE` yet (not required by any test or feature through Phase 3).
+- There is no single-document `GET /api/documents/{id}` endpoint.
 
 ## Phase log
 
@@ -122,3 +157,6 @@ All limits are configurable via environment variables (see `.env.example`), neve
 - **Phase 2**: `organizations`/`users`/`memberships` schema, Alembic, Argon2id hashing, JWT auth, server-derived tenant resolution.
 - **Phase 3**: `documents`/`document_pages` schema, multipart upload with full validation, PyMuPDF extraction, local filesystem storage behind a swappable interface, organization-scoped upload/list, failure-mode handling with storage cleanup. Verified against real Postgres and a real running server — 29/29 tests passing, plus a manual walkthrough (upload, list, isolation, all rejection cases) confirmed against live HTTP requests.
 - **Phase 4** (this phase): `document_chunks` + pgvector (`vector(1536)`, HNSW cosine index), `EmbeddingProvider` interface, best-effort chunk+embed after upload with graceful degradation and an org-scoped recovery function, and `POST /api/retrieval/search`. 59/59 tests pass against real PostgreSQL + real pgvector; tenant-isolation tests verified by mutation (removing the org filter makes exactly the isolation tests fail).
+- **Phase 5**: hashed, rotatable organization assistant tokens; authenticated assistant status/create/regenerate endpoints; public-token API entry; organization-scoped document deletion.
+- **Phase 6**: `POST /api/ask` composes existing retrieval with an LLM provider abstraction, returns application-generated document/page citations, refuses when no relevant context is found, and maps provider failures to safe errors. LLM tests use deterministic fakes. Full suite: 73 tests pass against PostgreSQL + pgvector.
+- **Phase 7**: structured LLM decision plans are evaluated by Laya behind an independent provider interface, with choice/boolean/score/classification types and deterministic eligibility combination. The final answer is generated from the organization-scoped context and decisions. No schema changes; 10 deterministic Phase 7 tests added; full suite: 84 passing against PostgreSQL + pgvector.
