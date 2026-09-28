@@ -18,6 +18,12 @@ class AssistantTokenResponse(BaseModel):
     embed_code: str
 
 
+class AssistantUsageResponse(BaseModel):
+    questions_asked: int
+    questions_answered: int
+    questions_unavailable: int
+
+
 class AskRequest(BaseModel):
     assistant_token: str | None = Field(default=None, max_length=200)
     question: str = Field(max_length=2000)

@@ -50,6 +50,21 @@ def test_assistant_management_requires_dashboard_authentication(client):
     assert client.post("/api/assistant/regenerate").status_code == 401
 
 
+def test_assistant_status_is_limited_to_the_authenticated_organization(client):
+    org_a = register_org(client, "assistant-status-a@example.com", "Assistant Status A")
+    org_b = register_org(client, "assistant-status-b@example.com", "Assistant Status B")
+    _create_assistant(client, org_a)
+
+    status_a = client.get("/api/assistant", headers=org_a.headers).json()
+    status_b = client.get("/api/assistant", headers=org_b.headers).json()
+    foreign_rotation = client.post("/api/assistant/regenerate", headers=org_b.headers)
+
+    assert status_a["configured"] is True
+    assert status_b["configured"] is False
+    assert status_b["assistant_id"] is None
+    assert foreign_rotation.status_code == 404
+
+
 def test_create_assistant_returns_one_time_token_and_embed_code(client, db_session):
     org = register_org(client, "assistant-create@example.com", "Assistant Org")
 
@@ -131,11 +146,13 @@ def test_assistant_url_opens_public_visitor_page_and_rejects_rotated_token(clien
 
     page = client.get(created["assistant_url"])
     assert page.status_code == 200
-    assert "Ask the organization assistant" in page.text
+    assert "What would you like to know?" in page.text
+    assert "citation" in page.text.lower()
     assert page.headers["referrer-policy"] == "no-referrer"
 
     rotated = client.post("/api/assistant/regenerate", headers=org.headers).json()
     expired_page = client.get(created["assistant_url"])
+    assert "This assistant link is no longer available" in expired_page.text
     assert expired_page.status_code == 401
     assert client.get(rotated["assistant_url"]).status_code == 200
 
@@ -215,6 +232,45 @@ def test_missing_llm_provider_returns_safe_503(client, embedding_provider):
     response = _ask(client, assistant["assistant_token"], "Anything?")
     assert response.status_code == 503
     assert response.json() == {"detail": "Language model provider is not configured"}
+
+
+def test_usage_counts_are_authenticated_and_organization_scoped(
+    client, tmp_storage, embedding_provider, llm_provider
+):
+    org_a = register_org(client, "assistant-usage-a@example.com", "Usage Org A")
+    org_b = register_org(client, "assistant-usage-b@example.com", "Usage Org B")
+    upload_pdf(client, org_a, [GPA_TEXT], filename="Usage_Rules.pdf")
+    assistant_a = _create_assistant(client, org_a)
+    assistant_b = _create_assistant(client, org_b)
+
+    answered = _ask(client, assistant_a["assistant_token"], "What GPA is required?")
+    unavailable = _ask(client, assistant_a["assistant_token"], "Explain quantum chromodynamics")
+    foreign_public_access = client.get(
+        "/api/assistant/usage", headers={"Authorization": f"Bearer {assistant_a['assistant_token']}"}
+    )
+    unauthenticated = client.get("/api/assistant/usage")
+
+    assert answered.status_code == 200
+    assert unavailable.status_code == 200
+    assert unauthenticated.status_code == 401
+    assert foreign_public_access.status_code == 401
+    assert client.get("/api/assistant/usage", headers=org_a.headers).json() == {
+        "questions_asked": 2,
+        "questions_answered": 1,
+        "questions_unavailable": 1,
+    }
+    assert client.get("/api/assistant/usage", headers=org_b.headers).json() == {
+        "questions_asked": 0,
+        "questions_answered": 0,
+        "questions_unavailable": 0,
+    }
+    assert assistant_b["assistant_id"] != assistant_a["assistant_id"]
+    assert client.get(
+        "/api/documents", headers={"Authorization": f"Bearer {assistant_a['assistant_token']}"}
+    ).status_code == 401
+    assert client.get(
+        "/api/assistant", headers={"Authorization": f"Bearer {assistant_a['assistant_token']}"}
+    ).status_code == 401
 
 
 def test_llm_provider_failure_returns_safe_503(client, embedding_provider):

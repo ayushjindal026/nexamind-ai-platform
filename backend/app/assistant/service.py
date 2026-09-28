@@ -4,6 +4,7 @@ import hashlib
 import secrets
 import uuid
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.assistant import Assistant
@@ -56,3 +57,18 @@ def get_assistant_for_token(db: Session, token: str) -> Assistant | None:
     if not token:
         return None
     return db.query(Assistant).filter(Assistant.token_hash == _token_hash(token)).one_or_none()
+
+
+def record_question_usage(db: Session, assistant_id: uuid.UUID, outcome: str | None = None) -> None:
+    """Atomically count accepted visitor questions and their final outcomes."""
+    values: dict[str, object] = {}
+    if outcome is None:
+        values["questions_asked"] = Assistant.questions_asked + 1
+    elif outcome == "answered":
+        values["questions_answered"] = Assistant.questions_answered + 1
+    elif outcome == "unavailable":
+        values["questions_unavailable"] = Assistant.questions_unavailable + 1
+    else:
+        raise ValueError("Unsupported question outcome")
+    db.execute(update(Assistant).where(Assistant.id == assistant_id).values(**values))
+    db.commit()

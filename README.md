@@ -1,10 +1,10 @@
 # Multi-Tenant AI Knowledge & Decision Assistant
 
-PanScience Innovations SDE-1 take-home. Built incrementally, phase by phase — see `IMPLEMENTATION_LOG.md` (added from Phase 2 onward) for what exists at each stage.
+PanScience Innovations SDE-1 take-home. This repository implements the multi-tenant document assistant backend, decision flow, and Phase 8 product interface.
 
-## Status: Phase 7 — Assistant access, grounded RAG, and structured decisions
+## Status: Phase 8 — Organization dashboard and visitor experience
 
-Phase 4 provides `document_chunks` with pgvector embeddings and organization-scoped retrieval. Phase 5 adds one assistant identity per organization with a hashed, rotatable visitor token, authenticated management endpoints, and tenant-scoped document deletion. Phase 6 adds unauthenticated `POST /api/ask`, which reuses Phase 4 retrieval and generates grounded answers through an LLM provider interface. Phase 7 adds an LLM decision planner and an independent Laya System 1 adapter for structured choice, boolean, score, and classification decisions. Structured results and deterministic eligibility combinations are included in the final grounded answer and API response. Public answers include server-generated document/page citations; when retrieval finds no sufficiently relevant chunk, the API responds that the information is not available without calling the LLM.
+Phase 4 provides `document_chunks` with pgvector embeddings and organization-scoped retrieval. Phase 5 adds hashed, rotatable organization assistant tokens and scoped document deletion. Phase 6 composes retrieval with grounded LLM answers and citations. Phase 7 uses Laya System 1 for structured decisions. Phase 8 adds an authenticated React dashboard, document management, assistant link/embed controls, basic question usage counts, a public visitor chat page, and an external iframe preview. The existing tenant model, RAG flow, Gemini/OpenAI adapters, and Laya decision architecture are reused.
 
 ## Architecture (final target — implemented incrementally)
 
@@ -68,6 +68,7 @@ documents ──< document_pages (raw extraction, one row per page)
 - `POST /api/assistant/regenerate` — authenticated; rotates the token and immediately revokes the previous one. Returns `404` if the organization has no assistant yet.
 - `POST /api/ask` — public; accepts `{"assistant_token": str, "question": str}`. The token may instead be supplied as the `assistant_token` query parameter in the returned URL. Server-side token validation resolves the organization; the client cannot provide an organization id. Response shape: `{"answer": str, "citations": [{"document_id", "document_name", "page_number", "citation"}]}`.
 - `DELETE /api/documents/{document_id}` — authenticated and organization-scoped; removes the stored PDF and its database record, pages, and chunks. A foreign or missing document returns `404`.
+- `GET /api/assistant/usage` — authenticated and organization-scoped; returns all-time `questions_asked`, `questions_answered`, and `questions_unavailable` totals for the organization's assistant. Questions count after a valid assistant token is accepted. Successful answers with source citations count as answered; no-context results and provider failures count as unavailable.
 
 The assistant token is generated with a cryptographic random source. Only its SHA-256 digest is stored; create and regenerate reveal the raw token once. The tokenized `/assistant` page provides the visitor chat form and is also used by the iframe embed. Phase 6 uses `OPENAI_API_KEY` for embeddings and chat completions, with `LLM_MODEL` (default `gpt-4o-mini`) selecting the answer model. `ANSWER_MIN_SIMILARITY` (default `0.25`) controls the no-context refusal threshold. Missing providers return a safe `503`; the test suite overrides the LLM dependency with deterministic fakes and never calls the live API.
 
@@ -87,6 +88,10 @@ Ports are read from `.env` — the values below are this project's defaults; if 
 - Backend: http://localhost:8000/health and http://localhost:8000/health/db
 - Frontend: http://localhost:5173
 - Postgres: localhost:5432 (credentials in `.env`)
+
+Open the organization dashboard at `http://localhost:5173`. Register a workspace or sign in, then add PDFs and configure the public assistant. The Docker Compose frontend uses the existing React/Vite setup; `cd frontend && npm install && npm run dev` is available when running the frontend outside Docker. Run `cd frontend && npm run build` to type-check and build the frontend.
+
+After upgrading the backend container, apply schema changes with `docker compose exec backend alembic upgrade head` before using the dashboard's usage counters.
 
 ### Database migrations
 
@@ -146,7 +151,7 @@ The recovery function embeds up to 200 pending chunks per invocation. Run it aga
 - Page-level chunks: a very long page becomes one large chunk until sub-page chunking is added.
 - Embedding happens synchronously inside the upload request (no worker), so upload latency includes one embedding call.
 - LLM grounding uses retrieved context and an explicit refusal instruction, but generated text cannot be guaranteed free of unsupported claims. Laya weights may need to be downloaded on first structured decision use; missing Laya configuration or inference errors return a safe 503 for decision requests, while ordinary RAG questions remain available.
-- The assistant API, visitor page, and iframe embed are provided, but this phase does not add an organization dashboard.
+- Usage counters are all-time totals and do not yet support date ranges or historical breakdowns.
 - If a document's final database commit fails *and* the follow-up "mark as failed" commit also fails within the same request, the row is left at `processing` with no automatic reconciliation. No queue/worker exists in this MVP to retry it — documented, not hidden (see `app/documents/service.py`).
 - Document storage is a local Docker volume; moving to S3 means implementing one more `StorageBackend`, not restructuring the document service.
 - There is no single-document `GET /api/documents/{id}` endpoint.
@@ -160,3 +165,10 @@ The recovery function embeds up to 200 pending chunks per invocation. Run it aga
 - **Phase 5**: hashed, rotatable organization assistant tokens; authenticated assistant status/create/regenerate endpoints; public-token API entry; organization-scoped document deletion.
 - **Phase 6**: `POST /api/ask` composes existing retrieval with an LLM provider abstraction, returns application-generated document/page citations, refuses when no relevant context is found, and maps provider failures to safe errors. LLM tests use deterministic fakes. Full suite: 73 tests pass against PostgreSQL + pgvector.
 - **Phase 7**: structured LLM decision plans are evaluated by Laya behind an independent provider interface, with choice/boolean/score/classification types and deterministic eligibility combination. The final answer is generated from the organization-scoped context and decisions. No schema changes; 10 deterministic Phase 7 tests added; full suite: 84 passing against PostgreSQL + pgvector.
+- **Phase 8**: authenticated React login/register and organization dashboard; tenant-scoped PDF management, assistant link and embed controls, basic per-assistant question counters, public visitor chat UI, and a token-free external embed preview page. Existing auth/document/assistant/ask endpoints are reused; adds authenticated `GET /api/assistant/usage` and three all-time counters on the assistant record.
+
+### Dashboard and assistant UI (Phase 8)
+
+The dashboard is served by the existing Vite frontend at `http://localhost:5173`; sign-in and registration use the existing JWT API. JWTs are held in `sessionStorage` for the current browser session. Document and assistant management use the existing authenticated APIs, which derive the organization from the JWT. Visitor URLs continue to point to the backend's validated `/assistant?assistant_token=...` route, so they work without dashboard login and remain compatible with the generated iframe. Usage totals are read from the authenticated `GET /api/assistant/usage` endpoint.
+
+To preview an embed on an external page, open `demo/embed-demo.html` (or serve the repository root) and paste the iframe code from the dashboard. The demo file contains no token; it constructs the iframe from the generated snippet at runtime.
