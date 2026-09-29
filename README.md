@@ -1,6 +1,17 @@
 # Multi-Tenant AI Knowledge & Decision Assistant
 
-This repository implements the multi-tenant document assistant backend, decision flow, and Phase 8 product interface.
+The problem I'm solving is fairly simple to describe, but surprisingly difficult to implement reliably.
+
+Organizations have large amounts of information stored inside PDFs, policies and internal documents. A normal LLM can answer questions about them, but it can also hallucinate, make incorrect decisions, or expose information belonging to another organization.
+
+So I built NexaMind as a multi-tenant AI knowledge assistant.
+
+An organization can upload its own documents, those documents are processed and embedded into a vector database, and users can then ask questions against that organization's knowledge base.
+
+But the interesting part isn't just RAG.
+
+The system can also break eligibility questions into individual conditions, evaluate those conditions using deterministic application logic and an AI-based semantic evaluator, combine the results into a structured decision, and then use the LLM only to explain the final result.
+
 
 ## Status: Phase 8 — Organization dashboard and visitor experience
 
