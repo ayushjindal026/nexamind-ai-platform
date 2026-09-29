@@ -1,6 +1,6 @@
 # Multi-Tenant AI Knowledge & Decision Assistant
 
-PanScience Innovations SDE-1 take-home. This repository implements the multi-tenant document assistant backend, decision flow, and Phase 8 product interface.
+This repository implements the multi-tenant document assistant backend, decision flow, and Phase 8 product interface.
 
 ## Status: Phase 8 — Organization dashboard and visitor experience
 
