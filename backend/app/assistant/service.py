@@ -4,7 +4,9 @@ import hashlib
 import secrets
 import uuid
 
+# pyrefly: ignore [missing-import]
 from sqlalchemy import update
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 
 from app.models.assistant import Assistant

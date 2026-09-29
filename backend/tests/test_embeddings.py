@@ -8,6 +8,7 @@ tests/embedding_fixtures.py — so nothing here needs network access.
 
 import uuid
 
+# pyrefly: ignore [missing-import]
 from sqlalchemy import text
 
 from app.embeddings.provider import EMBEDDING_DIMENSION

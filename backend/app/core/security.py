@@ -16,6 +16,7 @@ indexed query per request and buys a single, auditable place where
 
 from datetime import datetime, timedelta, timezone
 
+# pyrefly: ignore [missing-import]
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError

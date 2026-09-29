@@ -5,6 +5,7 @@ import logging
 from typing import Protocol
 
 from google import genai
+# pyrefly: ignore [missing-import]
 from google.genai import types
 from openai import OpenAI, OpenAIError
 

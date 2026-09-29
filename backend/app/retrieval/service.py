@@ -30,6 +30,7 @@ partitioning) are production improvements, not needed for this MVP.
 import uuid
 from dataclasses import dataclass
 
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 
 from app.models.document import Document, DocumentStatus

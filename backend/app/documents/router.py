@@ -17,7 +17,9 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+# pyrefly: ignore [missing-import]
 from sqlalchemy.exc import SQLAlchemyError
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_membership

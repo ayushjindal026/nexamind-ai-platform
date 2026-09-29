@@ -23,6 +23,7 @@ class LayaDecisionEngine:
     def __init__(self, router=None):
         if router is None:
             try:
+                # pyrefly: ignore [missing-import]
                 from laya import Router
 
                 router = Router(device=settings.laya_device)

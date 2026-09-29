@@ -3,7 +3,9 @@ Auth business logic, kept separate from the router so the router stays a
 thin HTTP-status translation layer (see auth/router.py).
 """
 
+# pyrefly: ignore [missing-import]
 from sqlalchemy.exc import IntegrityError
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password

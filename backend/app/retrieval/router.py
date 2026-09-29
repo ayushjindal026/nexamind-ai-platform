@@ -14,7 +14,9 @@ get_current_membership, never from the request.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+# pyrefly: ignore [missing-import]
 from sqlalchemy.exc import SQLAlchemyError
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_membership
