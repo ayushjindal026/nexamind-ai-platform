@@ -1,6 +1,5 @@
 # Nexa Mind AI Assistant
 
-<<<<<<< HEAD
 The problem I'm solving is fairly simple to describe, but surprisingly difficult to implement reliably.
 
 Organizations have large amounts of information stored inside PDFs, policies and internal documents. A normal LLM can answer questions about them, but it can also hallucinate, make incorrect decisions, or expose information belonging to another organization.
@@ -12,10 +11,6 @@ An organization can upload its own documents, those documents are processed and 
 But the interesting part isn't just RAG.
 
 The system can also break eligibility questions into individual conditions, evaluate those conditions using deterministic application logic and an AI-based semantic evaluator, combine the results into a structured decision, and then use the LLM only to explain the final result.
-
-=======
-PanScience Innovations SDE-1 take-home. Nexa Mind is the product name for this multi-tenant knowledge assistant, decision flow, and organization workspace.
->>>>>>> 5d917ba (Nexa Mind AI Assistant)
 
 ## Status: Phase 8 — Organization dashboard and visitor experience
 
