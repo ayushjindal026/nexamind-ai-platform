@@ -18,7 +18,14 @@ export type AssistantStatus = { configured: boolean; assistant_id: string | null
 export type AssistantLink = { assistant_id: string; assistant_token: string; assistant_url: string; embed_code: string };
 export type Usage = { questions_asked: number; questions_answered: number; questions_unavailable: number };
 export type Citation = { document_id: string; document_name: string; page_number: number; citation: string };
-export type AskResult = { answer: string; citations: Citation[]; decisions: unknown[]; decision_outcome: string | null };
+export type Decision = {
+  question_id: string;
+  question: string;
+  decision_type: "choice" | "boolean" | "score" | "classification";
+  value: string | boolean | number;
+  probability: number | null;
+};
+export type AskResult = { answer: string; citations: Citation[]; decisions: Decision[]; decision_outcome: string | null };
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -37,7 +44,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   } catch {
-    throw new ApiError("We could not reach the PanScience service. Check your connection and try again.", 0);
+    throw new ApiError("We could not reach the Nexa Mind service. Check your connection and try again.", 0);
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({})) as { detail?: string };
